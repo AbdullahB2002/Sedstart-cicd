@@ -1,8 +1,33 @@
-- script: |
-    # Install Sedstart runner from GitHub
-    npm install -g git+https://github.com/sedinqa/sedstart-ci-run.git
+trigger:
+- main
 
-    # Run Sedstart test case
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+- group: SedstartVariables  # Make sure this variable group is authorized for your pipeline
+
+steps:
+- checkout: self
+
+# Step 1: Install Node.js 20
+- task: NodeTool@0
+  inputs:
+    versionSpec: '20.x'
+  displayName: "Install Node.js 20"
+
+# Step 2: Install Sedstart runner from GitHub
+- script: |
+    echo "Cleaning npm cache..."
+    npm cache clean --force
+
+    echo "Installing Sedstart runner from GitHub..."
+    npm install -g git+https://github.com/sedinqa/sedstart-ci-run.git
+  displayName: "Install Sedstart Runner from GitHub"
+
+# Step 3: Run Sedstart test case
+- script: |
+    echo "Running Sedstart test case..."
     sedstart-ci-run \
       --api_key "$(SEDSTART_API_KEY)" \
       --project_id "$(SEDSTART_PROJECT_ID)" \
@@ -11,5 +36,6 @@
       --browser "$(SEDSTART_BROWSER)" \
       --headless "$(SEDSTART_HEADLESS)" \
       --environment "$(SEDSTART_ENVIRONMENT)"
-  displayName: "Run Sedstart Testcase (GitHub)"
+  displayName: "Run Sedstart Testcase"
+
 
