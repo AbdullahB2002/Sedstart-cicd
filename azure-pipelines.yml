@@ -4,70 +4,86 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
-# Your variable group (the one where you stored API key, IDs, etc.)
 variables:
 - group: SedstartVariables
-
-# These are safe defaults so the pipeline never fails because a variable is empty
 - name: SEDSTART_BROWSER
   value: chrome
 - name: SEDSTART_HEADLESS
   value: true
 - name: SEDSTART_ENVIRONMENT
-  value: QA   # or Prod – change if you want
+  value: QA
 
 steps:
 - checkout: self
 
-# Node + jq are needed for nice JSON parsing
 - task: NodeTool@0
   inputs:
     versionSpec: '20.x'
   displayName: 'Install Node.js 20'
 
-# THIS IS THE ONLY STEP THAT RUNS YOUR SEDSTART TESTS
 - script: |
-    echo "Triggering Sedstart no-code test..."
+    echo "=== VALUES WE ARE SENDING TO SEDSTART ==="
+    echo "API_KEY      : ${SEDSTART_API_KEY:0:10}****************"
+    echo "PROJECT_ID   : $(SEDSTART_PROJECT_ID)"
+    echo "TEST_ID      : $(SEDSTART_TEST_ID)"
+    echo "PROFILE_ID   : $(SEDSTART_PROFILE_ID)"
+    echo "BROWSER      : $(SEDSTART_BROWSER)"
+    echo "ENVIRONMENT  : $(SEDSTART_ENVIRONMENT)"
+    echo ""
 
+    echo "Calling Sedstart API..."
     curl -s -X POST https://api.sedstart.io/v1/runs \
       -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
       -H "Content-Type: application/json" \
       -d '{
-        "project_id": "$(SEDSTART_PROJECT_ID)",
-        "test_id": "$(SEDSTART_TEST_ID)",
-        "profile_id": "$(SEDSTART_PROFILE_ID)",
-        "browser": "$(SEDSTART_BROWSER)",
-        "headless": $(SEDSTART_HEADLESS),
-        "environment": "$(SEDSTART_ENVIRONMENT)",
+        "project_id":   "$(SEDSTART_PROJECT_ID)",
+        "test_id":      "$(SEDSTART_TEST_ID)",
+        "profile_id":   "$(SEDSTART_PROFILE_ID)",
+        "browser":      "$(SEDSTART_BROWSER)",
+        "headless":     $(SEDSTART_HEADLESS),
+        "environment":  "$(SEDSTART_ENVIRONMENT)",
         "wait_for_completion": true
-      }' > sedstart_response.json
+      }' -w "\nHTTP_STATUS:%{http_code}\n" > sedstart_response.txt
 
-    echo "=== Sedstart raw response ==="
-    cat sedstart_response.json
+    cat sedstart_response.txt
     echo ""
 
-    # Check JSON is valid
-    jq . sedstart_response.json > /dev/null || {
-      echo "##vso[task.logissue type=error]Sedstart returned invalid JSON"
+    # Separate body and HTTP status
+    HTTP_CODE=$(grep "HTTP_STATUS" sedstart_response.txt | cut -d: -f2)
+    BODY=$(sed '/HTTP_STATUS/d' sedstart_response.txt)
+
+    echo "HTTP Status Code : $HTTP_CODE"
+    echo "Raw body         :"
+    echo "$BODY"
+
+    # If not 200 → fail immediately
+    if [ "$HTTP_CODE" != "200" ]; then
+      echo "##vso[task.logissue type=error]Sedstart API returned $HTTP_CODE"
       exit 1
-    }
+    fi
 
-    # Extract values safely
-    STATUS=$(jq -r '.status // "failed"' sedstart_response.json)
-    PASSED=$(jq -r '.summary.passed // 0' sedstart_response.json)
-    FAILED=$(jq -r '.summary.failed // 0' sedstart_response.json)
+    # If body is empty or not JSON → fail with clear message
+    echo "$BODY" | jq . > /dev/null 2>&1
+    # test if valid JSON
+    if [ $? -ne 0 ]; then
+      echo "##vso[task.logissue type=error]Sedstart did not return valid JSON (probably wrong API key or IDs)"
+      echo "$BODY"
+      exit 1
+    fi
 
-    echo "Status  : $STATUS"
-    echo "Passed  : $PASSED"
-    echo "Failed  : $FAILED"
+    # Extract values safely (default to 0 if missing)
+    PASSED=$(echo "$BODY" | jq -r '.summary.passed // 0')
+    FAILED=$(echo "$BODY" | jq -r '.summary.failed // 0')
+    STATUS=$(echo "$BODY" | jq -r '.status // "failed"')
 
-    # Fail the whole pipeline if anything went wrong
-    if [ "$STATUS" != "passed" ] && [ "$FAILED" -gt 0 ]; then
+    echo "Result → Status: $STATUS | Passed: $PASSED | Failed: $FAILED"
+
+    if [ "$FAILED" -gt 0 ]; then
       echo "##vso[task.logissue type=error]Sedstart tests FAILED ($FAILED failed)"
       exit 1
     else
-      echo "All Sedstart tests PASSED"
+      echo "All Sedstart no-code tests PASSED"
     fi
-  displayName: 'Run Sedstart No-Code Tests (Guaranteed Working)'
+  displayName: 'Run Sedstart Tests – Final Bulletproof Version'
 
 
