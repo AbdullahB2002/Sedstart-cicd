@@ -2,82 +2,28 @@ trigger:
 - main
 
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: ubuntu-latest
 
 variables:
-- group: SedstartVariables  # API_KEY, PROJECT_ID, TEST_ID, PROFILE_ID
-
-# Defaults (add to group if custom needed)
-- name: SEDSTART_BROWSER
-  value: chrome
-- name: SEDSTART_HEADLESS
-  value: true
-- name: SEDSTART_ENVIRONMENT
-  value: QA
+- group: SedstartVariables   # ← your existing group with PROJECT_ID, TEST_ID, PROFILE_ID
 
 steps:
-- checkout: self
-
-# Install Node 20
-- task: NodeTool@0
-  inputs:
-    versionSpec: '20.x'
-  displayName: 'Install Node.js 20'
-
-# Auth GitHub + Local Install (Fixes PATH + Permission Issues)
 - script: |
-    echo "=== Auth & NPM Setup ==="
-    git config --global url."https://${GITHUB_PAT}@github.com/".insteadOf "https://github.com/"
-    
-    npm config set fund false  # Skip funding noise
-    npm cache clean --force
-    
-    echo "=== Installing Sedstart Runner Locally (Verbose) ==="
-    npm install git+https://github.com/sedinqa/sedstart-ci-run.git --save-dev --verbose
-    
-    # Verify install
-    if [ -f "node_modules/.bin/sedstart-ci-run" ]; then
-      echo "SUCCESS: Runner installed at node_modules/.bin/"
-      ls -la node_modules/.bin/sedstart*
-      ./node_modules/.bin/sedstart-ci-run --help || echo "Help failed, but file exists"
-    else
-      echo "FAIL: Install didn't create binary—check npm logs above"
-      exit 1
-    fi
-  displayName: 'Install Sedstart Runner Locally (With Auth & Verify)'
+    echo "Triggering Sedstart tests in GitHub..."
+    curl -X POST https://api.github.com/repos/AbdullahB2002/Sedstart-cicd/dispatches \
+      -H "Authorization: token $(GITHUB_PAT)" \
+      -H "Accept: application/vnd.github.v3+json" \
+      -d '{
+        "event_type": "run-sedstart",
+        "client_payload": {
+          "project_id": "$(SEDSTART_PROJECT_ID)",
+          "test_id": "$(SEDSTART_TEST_ID)",
+          "profile_id": "$(SEDSTART_PROFILE_ID)"
+        }
+      }'
+    echo "Done! Check results here → https://github.com/AbdullahB2002/Sedstart-cicd/actions"
   env:
     GITHUB_PAT: $(GITHUB_PAT)
-
-# Run Tests with Local Binary (No Global PATH Drama)
-- script: |
-    echo "=== Debug: Vars Sending to Runner ==="
-    echo "PROJECT_ID: $(SEDSTART_PROJECT_ID)"
-    echo "TEST_ID: $(SEDSTART_TEST_ID)"
-    echo "PROFILE_ID: $(SEDSTART_PROFILE_ID)"
-    echo "BROWSER: $(SEDSTART_BROWSER)"
-    echo "HEADLESS: $(SEDSTART_HEADLESS)"
-    echo "ENV: $(SEDSTART_ENVIRONMENT)"
-    echo ""
-    
-    echo "Running Sedstart test case..."
-    ./node_modules/.bin/sedstart-ci-run \
-      --api_key "$(SEDSTART_API_KEY)" \
-      --project_id "$(SEDSTART_PROJECT_ID)" \
-      --test_id "$(SEDSTART_TEST_ID)" \
-      --profile_id "$(SEDSTART_PROFILE_ID)" \
-      --browser "$(SEDSTART_BROWSER)" \
-      --headless "$(SEDSTART_HEADLESS)" \
-      --environment "$(SEDSTART_ENVIRONMENT)"
-    
-    # Check exit code for fail (runner should exit 1 on test fails)
-    if [ $? -ne 0 ]; then
-      echo "##vso[task.logissue type=error]Sedstart runner failed (check logs above)"
-      exit 1
-    fi
-    
-    echo "Sedstart tests completed successfully!"
-  displayName: 'Run Sedstart Test Case (Local Binary)'
-  env:
-    SEDSTART_API_KEY: $(SEDSTART_API_KEY)  # All vars passed via env
+  displayName: 'Trigger Sedstart Tests (GitHub handles the rest)'
 
 
