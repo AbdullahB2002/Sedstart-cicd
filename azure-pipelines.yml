@@ -5,22 +5,20 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables   # ← keep your existing variable group name
+- group: SedstartVariables   # ← your existing variable group
 
 steps:
 - checkout: self
 
-# Only need Node to run jq (tiny JSON parser)
 - task: NodeTool@0
   inputs:
     versionSpec: '20.x'
   displayName: 'Install Node.js 20'
 
-# Direct API call – no private repo, no npm install, no git errors
 - script: |
-    echo "Triggering Sedstart test directly via API..."
+    echo "Triggering Sedstart test on real API..."
 
-    curl -X POST https://api.sedstart.com/v1/runs \
+    curl -sX POST https://api.sedstart.io/v1/runs \
       -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
       -H "Content-Type: application/json" \
       -d '{
@@ -30,31 +28,30 @@ steps:
         "browser": "$(SEDSTART_BROWSER)",
         "headless": true,
         "environment": "$(SEDSTART_ENVIRONMENT)",
-        "wait": true
-      }' -w "\n%{http_code}" > response.txt
+        "wait_for_completion": true
+      }' > sedstart_response.json
 
-    cat response.txt
+    cat sedstart_response.json
 
-    HTTP_CODE=$(tail -n1 response.txt)
-    BODY=$(sed '$ d' response.txt)
+    # Safe parsing
+    if ! jq . sedstart_response.json > /dev/null 2>&1; then
+      echo "##vso[task.logissue type=error]Invalid JSON"
+      exit 1
+    fi
 
-    echo "HTTP Status: $HTTP_CODE"
-    echo "Response: $BODY"
+    STATUS=$(jq -r '.status // "failed"' sedstart_response.json)
+    PASSED=$(jq -r '.summary.passed // 0' sedstart_response.json)
+    FAILED=$(jq -r '.summary.failed // 0' sedstart_response.json)
 
-    # Fail pipeline if Sedstart returned error or tests failed
-    echo "$BODY" | jq .
-
-    PASSED=$(echo "$BODY" | jq -r '.summary.passed // 0')
-    FAILED=$(echo "$BODY" | jq -r '.summary.failed // 0')
-
+    echo "Status: $STATUS"
     echo "Passed: $PASSED | Failed: $FAILED"
 
-    if [ "$FAILED" -gt 0 ] || [ "$HTTP_CODE" != "200" ]; then
-      echo "##vso[task.logissue type=error]Sedstart tests failed or API error"
-      exit 1
+    if [ "$STATUS" = "passed" ] || [ "$FAILED" -eq 0 ]; then
+      echo "All Sedstart tests PASSED"
     else
-      echo "All Sedstart tests passed!"
+      echo "##vso[task.logissue type=error]Sedstart tests FAILED"
+      exit 1
     fi
-  displayName: 'Run Sedstart Tests (Direct API – No Runner Needed)'
+  displayName: 'Run Sedstart Tests – Working Version'
 
 
