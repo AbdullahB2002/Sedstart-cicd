@@ -4,17 +4,20 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
+# Use the variable group you created in Library
 variables:
-- group: SedstartVariables   # variable group name
+- group: SedstartVariables
 
 steps:
 - checkout: self
 
+# Install Node.js 20 (required for Sedstart CI runner)
 - task: NodeTool@0
   inputs:
     versionSpec: '20.x'
-  displayName: 'Install Node 20'
+  displayName: "Install Node.js 20"
 
+# Run Sedstart Testcase using your variables
 - script: |
     npx sedstart-ci-run \
       --api_key "$(SEDSTART_API_KEY)" \
