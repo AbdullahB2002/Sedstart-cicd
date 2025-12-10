@@ -1,25 +1,9 @@
-trigger:
-- main
-
-pool:
-  vmImage: 'ubuntu-latest'
-
-# Use the variable group you created in Library
-variables:
-- group: SedstartVariables
-
-steps:
-- checkout: self
-
-# Install Node.js 20 (required for Sedstart CI runner)
-- task: NodeTool@0
-  inputs:
-    versionSpec: '20.x'
-  displayName: "Install Node.js 20"
-
-# Run Sedstart Testcase using your variables
 - script: |
-    npx sedstart-ci-run \
+    # Install Sedstart runner from GitHub
+    npm install -g git+https://github.com/sedinqa/sedstart-ci-run.git
+
+    # Run Sedstart test case
+    sedstart-ci-run \
       --api_key "$(SEDSTART_API_KEY)" \
       --project_id "$(SEDSTART_PROJECT_ID)" \
       --test_id "$(SEDSTART_TEST_ID)" \
@@ -27,4 +11,5 @@ steps:
       --browser "$(SEDSTART_BROWSER)" \
       --headless "$(SEDSTART_HEADLESS)" \
       --environment "$(SEDSTART_ENVIRONMENT)"
-  displayName: "Run Sedstart Testcase"
+  displayName: "Run Sedstart Testcase (GitHub)"
+
