@@ -5,7 +5,9 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables
+- group: SedstartVariables  # Your group with API_KEY, PROJECT_ID, TEST_ID, PROFILE_ID
+
+# Defaults for optional vars (add to your group if you want custom)
 - name: SEDSTART_BROWSER
   value: chrome
 - name: SEDSTART_HEADLESS
@@ -16,58 +18,45 @@ variables:
 steps:
 - checkout: self
 
+# Step 1: Install Node.js 20
 - task: NodeTool@0
   inputs:
     versionSpec: '20.x'
   displayName: 'Install Node.js 20'
 
+# Step 2: Auth GitHub + Install Sedstart Runner (This fixes the permission error)
 - script: |
-    echo "=== DEBUG: VALUES TO SEDSTART ==="
-    echo "API_KEY (masked): ${SEDSTART_API_KEY:0:10}****************"
-    echo "PROJECT_ID: '$(SEDSTART_PROJECT_ID)'"
-    echo "TEST_ID: '$(SEDSTART_TEST_ID)'"
-    echo "PROFILE_ID: '$(SEDSTART_PROFILE_ID)'"
-    echo "BROWSER: '$(SEDSTART_BROWSER)'"
-    echo "ENV: '$(SEDSTART_ENVIRONMENT)'"
-    echo ""
+    echo "Authenticating with GitHub for private repo..."
+    # Inject PAT into git URLs for HTTPS access
+    git config --global url."https://${GITHUB_PAT}@github.com/".insteadOf "https://github.com/"
+    
+    echo "Cleaning npm cache..."
+    npm cache clean --force
+    
+    echo "Installing Sedstart runner from GitHub..."
+    npm install -g git+https://github.com/sedinqa/sedstart-ci-run.git
+    
+    # Verify install
+    sedstart-ci-run --version || echo "Runner installed but version check optional"
+  displayName: 'Install Sedstart Runner (With GitHub Auth)'
+  env:
+    GITHUB_PAT: $(GITHUB_PAT)  # Your new secret
 
-    # Test 1: Simple ping to base API (should 401 if auth works, but confirms domain)
-    echo "=== TEST 1: Ping base API ==="
-    curl -v -H "Authorization: Bearer $(SEDSTART_API_KEY)" https://api.sedstart.io/v1/ 2>&1 | head -20
-    echo ""
-
-    # Test 2: Trigger run on likely real endpoint (project/tests/runs)
-    echo "=== TEST 2: Trigger test run ==="
-    curl -v -X POST "https://api.sedstart.io/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/runs" \
-      -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
-      -H "Content-Type: application/json" \
-      -d '{
-        "profile_id": "$(SEDSTART_PROFILE_ID)",
-        "browser": "$(SEDSTART_BROWSER)",
-        "headless": $(SEDSTART_HEADLESS),
-        "environment": "$(SEDSTART_ENVIRONMENT)",
-        "wait_for_completion": true
-      }' -w "\nHTTP_CODE:%{http_code}\nTIME:%{time_total}s\n" > sedstart_response.txt 2>&1
-
-    echo "=== FULL CURL OUTPUT (verbose + response) ==="
-    cat sedstart_response.txt
-    echo ""
-
-    # Extract HTTP code (ignore if 000)
-    HTTP_CODE=$(grep -o "HTTP_CODE:[0-9]*" sedstart_response.txt | cut -d: -f2 || echo "0")
-    echo "Extracted HTTP Code: $HTTP_CODE"
-
-    # If connected but auth/project wrong, show body
-    BODY=$(grep -v "HTTP_CODE\|TIME" sedstart_response.txt | tail -n +1)
-    if [ -n "$BODY" ] && [ "$HTTP_CODE" != "000" ]; then
-      echo "Response Body:"
-      echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
-    fi
-
-    # Temp: Don't fail yet—log success for debug
-    echo "=== DEBUG COMPLETE: Check logs above for connection/auth errors ==="
-    echo "If HTTP 000: Wrong domain/endpoint. If 401/404: Bad key/ID."
-    echo "All 'passed' for now—fix based on verbose output."
-  displayName: 'Run Sedstart Tests – Verbose Debug (No Fail Yet)'
+# Step 3: Run Sedstart Tests with Official Runner
+- script: |
+    echo "Running Sedstart test case..."
+    sedstart-ci-run \
+      --api_key "$(SEDSTART_API_KEY)" \
+      --project_id "$(SEDSTART_PROJECT_ID)" \
+      --test_id "$(SEDSTART_TEST_ID)" \
+      --profile_id "$(SEDSTART_PROFILE_ID)" \
+      --browser "$(SEDSTART_BROWSER)" \
+      --headless "$(SEDSTART_HEADLESS)" \
+      --environment "$(SEDSTART_ENVIRONMENT)"
+    
+    echo "Sedstart run complete—check logs above for results!"
+  displayName: 'Run Sedstart Test Case'
+  env:
+    SEDSTART_API_KEY: $(SEDSTART_API_KEY)  # Passes all secrets/vars to runner
 
 
