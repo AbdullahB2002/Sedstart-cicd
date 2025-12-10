@@ -5,37 +5,56 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables  # Make sure this variable group is authorized for your pipeline
+- group: SedstartVariables   # ← keep your existing variable group name
 
 steps:
 - checkout: self
 
-# Step 1: Install Node.js 20
+# Only need Node to run jq (tiny JSON parser)
 - task: NodeTool@0
   inputs:
     versionSpec: '20.x'
-  displayName: "Install Node.js 20"
+  displayName: 'Install Node.js 20'
 
-# Step 2: Install Sedstart runner from GitHub
+# Direct API call – no private repo, no npm install, no git errors
 - script: |
-    echo "Cleaning npm cache..."
-    npm cache clean --force
+    echo "Triggering Sedstart test directly via API..."
 
-    echo "Installing Sedstart runner from GitHub..."
-    npm install -g git+https://github.com/sedinqa/sedstart-ci-run.git
-  displayName: "Install Sedstart Runner from GitHub"
+    curl -X POST https://api.sedstart.com/v1/runs \
+      -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "project_id": "$(SEDSTART_PROJECT_ID)",
+        "test_id": "$(SEDSTART_TEST_ID)",
+        "profile_id": "$(SEDSTART_PROFILE_ID)",
+        "browser": "$(SEDSTART_BROWSER)",
+        "headless": true,
+        "environment": "$(SEDSTART_ENVIRONMENT)",
+        "wait": true
+      }' -w "\n%{http_code}" > response.txt
 
-# Step 3: Run Sedstart test case
-- script: |
-    echo "Running Sedstart test case..."
-    sedstart-ci-run \
-      --api_key "$(SEDSTART_API_KEY)" \
-      --project_id "$(SEDSTART_PROJECT_ID)" \
-      --test_id "$(SEDSTART_TEST_ID)" \
-      --profile_id "$(SEDSTART_PROFILE_ID)" \
-      --browser "$(SEDSTART_BROWSER)" \
-      --headless "$(SEDSTART_HEADLESS)" \
-      --environment "$(SEDSTART_ENVIRONMENT)"
-  displayName: "Run Sedstart Testcase"
+    cat response.txt
+
+    HTTP_CODE=$(tail -n1 response.txt)
+    BODY=$(sed '$ d' response.txt)
+
+    echo "HTTP Status: $HTTP_CODE"
+    echo "Response: $BODY"
+
+    # Fail pipeline if Sedstart returned error or tests failed
+    echo "$BODY" | jq .
+
+    PASSED=$(echo "$BODY" | jq -r '.summary.passed // 0')
+    FAILED=$(echo "$BODY" | jq -r '.summary.failed // 0')
+
+    echo "Passed: $PASSED | Failed: $FAILED"
+
+    if [ "$FAILED" -gt 0 ] || [ "$HTTP_CODE" != "200" ]; then
+      echo "##vso[task.logissue type=error]Sedstart tests failed or API error"
+      exit 1
+    else
+      echo "All Sedstart tests passed!"
+    fi
+  displayName: 'Run Sedstart Tests (Direct API – No Runner Needed)'
 
 
