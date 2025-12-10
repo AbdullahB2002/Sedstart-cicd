@@ -5,9 +5,9 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables  # Your group with API_KEY, PROJECT_ID, TEST_ID, PROFILE_ID
+- group: SedstartVariables  # API_KEY, PROJECT_ID, TEST_ID, PROFILE_ID
 
-# Defaults for optional vars (add to your group if you want custom)
+# Defaults (add to group if custom needed)
 - name: SEDSTART_BROWSER
   value: chrome
 - name: SEDSTART_HEADLESS
@@ -18,34 +18,49 @@ variables:
 steps:
 - checkout: self
 
-# Step 1: Install Node.js 20
+# Install Node 20
 - task: NodeTool@0
   inputs:
     versionSpec: '20.x'
   displayName: 'Install Node.js 20'
 
-# Step 2: Auth GitHub + Install Sedstart Runner (This fixes the permission error)
+# Auth GitHub + Local Install (Fixes PATH + Permission Issues)
 - script: |
-    echo "Authenticating with GitHub for private repo..."
-    # Inject PAT into git URLs for HTTPS access
+    echo "=== Auth & NPM Setup ==="
     git config --global url."https://${GITHUB_PAT}@github.com/".insteadOf "https://github.com/"
     
-    echo "Cleaning npm cache..."
+    npm config set fund false  # Skip funding noise
     npm cache clean --force
     
-    echo "Installing Sedstart runner from GitHub..."
-    npm install -g git+https://github.com/sedinqa/sedstart-ci-run.git
+    echo "=== Installing Sedstart Runner Locally (Verbose) ==="
+    npm install git+https://github.com/sedinqa/sedstart-ci-run.git --save-dev --verbose
     
     # Verify install
-    sedstart-ci-run --version || echo "Runner installed but version check optional"
-  displayName: 'Install Sedstart Runner (With GitHub Auth)'
+    if [ -f "node_modules/.bin/sedstart-ci-run" ]; then
+      echo "SUCCESS: Runner installed at node_modules/.bin/"
+      ls -la node_modules/.bin/sedstart*
+      ./node_modules/.bin/sedstart-ci-run --help || echo "Help failed, but file exists"
+    else
+      echo "FAIL: Install didn't create binary—check npm logs above"
+      exit 1
+    fi
+  displayName: 'Install Sedstart Runner Locally (With Auth & Verify)'
   env:
-    GITHUB_PAT: $(GITHUB_PAT)  # Your new secret
+    GITHUB_PAT: $(GITHUB_PAT)
 
-# Step 3: Run Sedstart Tests with Official Runner
+# Run Tests with Local Binary (No Global PATH Drama)
 - script: |
+    echo "=== Debug: Vars Sending to Runner ==="
+    echo "PROJECT_ID: $(SEDSTART_PROJECT_ID)"
+    echo "TEST_ID: $(SEDSTART_TEST_ID)"
+    echo "PROFILE_ID: $(SEDSTART_PROFILE_ID)"
+    echo "BROWSER: $(SEDSTART_BROWSER)"
+    echo "HEADLESS: $(SEDSTART_HEADLESS)"
+    echo "ENV: $(SEDSTART_ENVIRONMENT)"
+    echo ""
+    
     echo "Running Sedstart test case..."
-    sedstart-ci-run \
+    ./node_modules/.bin/sedstart-ci-run \
       --api_key "$(SEDSTART_API_KEY)" \
       --project_id "$(SEDSTART_PROJECT_ID)" \
       --test_id "$(SEDSTART_TEST_ID)" \
@@ -54,9 +69,15 @@ steps:
       --headless "$(SEDSTART_HEADLESS)" \
       --environment "$(SEDSTART_ENVIRONMENT)"
     
-    echo "Sedstart run complete—check logs above for results!"
-  displayName: 'Run Sedstart Test Case'
+    # Check exit code for fail (runner should exit 1 on test fails)
+    if [ $? -ne 0 ]; then
+      echo "##vso[task.logissue type=error]Sedstart runner failed (check logs above)"
+      exit 1
+    fi
+    
+    echo "Sedstart tests completed successfully!"
+  displayName: 'Run Sedstart Test Case (Local Binary)'
   env:
-    SEDSTART_API_KEY: $(SEDSTART_API_KEY)  # Passes all secrets/vars to runner
+    SEDSTART_API_KEY: $(SEDSTART_API_KEY)  # All vars passed via env
 
 
