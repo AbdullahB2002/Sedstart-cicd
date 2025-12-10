@@ -1,0 +1,27 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+- group: SedstartVariables   # variable group name
+
+steps:
+- checkout: self
+
+- task: NodeTool@0
+  inputs:
+    versionSpec: '20.x'
+  displayName: 'Install Node 20'
+
+- script: |
+    npx sedstart-ci-run \
+      --api_key "$(SEDSTART_API_KEY)" \
+      --project_id "$(SEDSTART_PROJECT_ID)" \
+      --test_id "$(SEDSTART_TEST_ID)" \
+      --profile_id "$(SEDSTART_PROFILE_ID)" \
+      --browser "$(SEDSTART_BROWSER)" \
+      --headless "$(SEDSTART_HEADLESS)" \
+      --environment "$(SEDSTART_ENVIRONMENT)"
+  displayName: "Run Sedstart Testcase"
