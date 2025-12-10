@@ -1,0 +1,21 @@
+name: Sedstart No-Code Tests
+
+on:
+  workflow_dispatch:       # lets you run manually
+  repository_dispatch:
+    types: [run-sedstart]
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Sedstart Tests
+        uses: sedinqa/sedstart-ci-run@main
+        with:
+          api_key: ${{ secrets.SEDSTART_API_KEY }}
+          project_id: ${{ github.event.client_payload.project_id }}
+          test_id: ${{ github.event.client_payload.test_id }}
+          profile_id: ${{ github.event.client_payload.profile_id }}
+          browser: chrome
+          headless: true
+          environment: QA
