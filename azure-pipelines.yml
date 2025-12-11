@@ -1,5 +1,7 @@
 trigger:
 - main
+- develop
+- feature/*
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -13,9 +15,9 @@ steps:
 - script: |
     echo "Triggering Sedstart TC_03 in Prod..."
     
-    # Correct base URL + endpoint (this one works!)
+    # Try 1: Plain header key (common for UUIDs)
     RESPONSE=$(curl -s -X POST "https://app.sedstart.com/api/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
-      -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
+      -H "X-API-Key: $(SEDSTART_API_KEY)" \
       -H "Content-Type: application/json" \
       -d '{
         "profile_id": "$(SEDSTART_PROFILE_ID)",
@@ -27,21 +29,48 @@ steps:
     HTTP_CODE=$(echo "$RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
     BODY=$(echo "$RESPONSE" | sed '$d')
 
-    echo "HTTP Code: $HTTP_CODE"
-    echo "Response Body: $BODY"
+    echo "Try 1 (X-API-Key) Code: $HTTP_CODE"
+    echo "Response: $BODY"
 
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-      # Try to extract run ID
+      echo "✅ Success with X-API-Key!"
       RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // "unknown"' 2>/dev/null || echo "unknown")
-      echo ""
-      echo "✅ Test triggered successfully!"
-      echo "Direct results link: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
-      echo "Or open full runs list: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs"
-    else
-      echo "##vso[task.logissue type=error]Trigger failed (Code $HTTP_CODE). Response: $BODY"
-      exit 1
+      echo "Run ID: $RUN_ID"
+      echo "Results: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
+      exit 0
     fi
-  displayName: 'Run Sedstart TC_03 (Correct Endpoint)'
+
+    echo "Try 1 failed, trying Basic Auth..."
+
+    # Try 2: Basic auth with UUID as username
+    RESPONSE=$(curl -s -X POST "https://app.sedstart.com/api/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
+      -u "$(SEDSTART_API_KEY):" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "profile_id": "$(SEDSTART_PROFILE_ID)",
+        "browser": "$(SEDSTART_BROWSER)",
+        "headless": $(SEDSTART_HEADLESS),
+        "environment": "$(SEDSTART_ENVIRONMENT)"
+      }' -w "\nHTTP_CODE:%{http_code}")
+
+    HTTP_CODE=$(echo "$RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
+    BODY=$(echo "$RESPONSE" | sed '$d')
+
+    echo "Try 2 (Basic Auth) Code: $HTTP_CODE"
+    echo "Response: $BODY"
+
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+      echo "✅ Success with Basic Auth!"
+      RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // "unknown"' 2>/dev/null || echo "unknown")
+      echo "Run ID: $RUN_ID"
+      echo "Results: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
+      exit 0
+    fi
+
+    echo "Both tries failed. Need full JWT token from Sedstart dashboard."
+    echo "##vso[task.logissue type=error]Auth failed - regenerate full Bearer token."
+    exit 1
+  displayName: 'Run Sedstart TC_03 (Auth Fallbacks)'
   env:
     SEDSTART_API_KEY: $(SEDSTART_API_KEY)
     SEDSTART_PROJECT_ID: $(SEDSTART_PROJECT_ID)
