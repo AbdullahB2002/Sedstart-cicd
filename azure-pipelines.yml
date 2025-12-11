@@ -7,17 +7,36 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables
+- group: SedstartVariables  # Add USERNAME, PASSWORD
 
 steps:
 - checkout: self
 
 - script: |
-    echo "Triggering Sedstart TC_03 in Prod..."
+    echo "Logging into Sedstart for session cookie..."
     
-    # Try 1: Plain header key (common for UUIDs)
-    RESPONSE=$(curl -s -X POST "https://app.sedstart.com/api/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
-      -H "X-API-Key: $(SEDSTART_API_KEY)" \
+    # Step 1: Login to get session cookies (fixes "named cookie not present")
+    LOGIN_RESPONSE=$(curl -s -c cookies.txt -X POST "https://app.sedstart.com/api/v1/auth/login" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "email": "$(SEDSTART_USERNAME)",
+        "password": "$(SEDSTART_PASSWORD)"
+      }' -w "\nLOGIN_CODE:%{http_code}")
+
+    LOGIN_CODE=$(echo "$LOGIN_RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
+    echo "Login Code: $LOGIN_CODE"
+
+    if [ "$LOGIN_CODE" != "200" ]; then
+      echo "##vso[task.logissue type=error]Login failed (Code $LOGIN_CODE). Check username/password."
+      exit 1
+    fi
+
+    echo "Login success! Cookies saved."
+    ls -la cookies.txt  # Verify jar created
+
+    # Step 2: Trigger test with cookies
+    echo "Triggering TC_03 with session..."
+    TRIGGER_RESPONSE=$(curl -s -b cookies.txt -X POST "https://app.sedstart.com/api/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
       -H "Content-Type: application/json" \
       -d '{
         "profile_id": "$(SEDSTART_PROFILE_ID)",
@@ -26,58 +45,33 @@ steps:
         "environment": "$(SEDSTART_ENVIRONMENT)"
       }' -w "\nHTTP_CODE:%{http_code}")
 
-    HTTP_CODE=$(echo "$RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
-    BODY=$(echo "$RESPONSE" | sed '$d')
+    HTTP_CODE=$(echo "$TRIGGER_RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
+    BODY=$(echo "$TRIGGER_RESPONSE" | sed '$d')
 
-    echo "Try 1 (X-API-Key) Code: $HTTP_CODE"
-    echo "Response: $BODY"
-
-    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-      echo "✅ Success with X-API-Key!"
-      RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // "unknown"' 2>/dev/null || echo "unknown")
-      echo "Run ID: $RUN_ID"
-      echo "Results: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
-      exit 0
-    fi
-
-    echo "Try 1 failed, trying Basic Auth..."
-
-    # Try 2: Basic auth with UUID as username
-    RESPONSE=$(curl -s -X POST "https://app.sedstart.com/api/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
-      -u "$(SEDSTART_API_KEY):" \
-      -H "Content-Type: application/json" \
-      -d '{
-        "profile_id": "$(SEDSTART_PROFILE_ID)",
-        "browser": "$(SEDSTART_BROWSER)",
-        "headless": $(SEDSTART_HEADLESS),
-        "environment": "$(SEDSTART_ENVIRONMENT)"
-      }' -w "\nHTTP_CODE:%{http_code}")
-
-    HTTP_CODE=$(echo "$RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
-    BODY=$(echo "$RESPONSE" | sed '$d')
-
-    echo "Try 2 (Basic Auth) Code: $HTTP_CODE"
-    echo "Response: $BODY"
+    echo "Trigger Code: $HTTP_CODE"
+    echo "Response Body: $BODY"
 
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-      echo "✅ Success with Basic Auth!"
-      RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // "unknown"' 2>/dev/null || echo "unknown")
-      echo "Run ID: $RUN_ID"
-      echo "Results: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
-      exit 0
+      RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // .id // "unknown"' 2>/dev/null || echo "unknown")
+      echo ""
+      echo "✅ Test triggered! Run ID: $RUN_ID"
+      echo "Direct results: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
+      echo "Video/screenshots ready in 1-5 mins."
+    else
+      echo "##vso[task.logissue type=error]Trigger failed (Code $HTTP_CODE). Response: $BODY"
+      exit 1
     fi
 
-    echo "Both tries failed. Need full JWT token from Sedstart dashboard."
-    echo "##vso[task.logissue type=error]Auth failed - regenerate full Bearer token."
-    exit 1
-  displayName: 'Run Sedstart TC_03 (Auth Fallbacks)'
+    # Clean up cookies (security)
+    rm -f cookies.txt
+  displayName: 'Run Sedstart TC_03 (Session Auth)'
   env:
-    SEDSTART_API_KEY: $(SEDSTART_API_KEY)
+    SEDSTART_USERNAME: $(SEDSTART_USERNAME)
+    SEDSTART_PASSWORD: $(SEDSTART_PASSWORD)
+    SEDSTART_API_KEY: $(SEDSTART_API_KEY)  # Backup if needed
     SEDSTART_PROJECT_ID: $(SEDSTART_PROJECT_ID)
     SEDSTART_TEST_ID: $(SEDSTART_TEST_ID)
     SEDSTART_PROFILE_ID: $(SEDSTART_PROFILE_ID)
     SEDSTART_BROWSER: $(SEDSTART_BROWSER)
     SEDSTART_HEADLESS: $(SEDSTART_HEADLESS)
     SEDSTART_ENVIRONMENT: $(SEDSTART_ENVIRONMENT)
-
-
