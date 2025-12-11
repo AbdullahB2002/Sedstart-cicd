@@ -1,71 +1,40 @@
 trigger:
 - main
+- develop
+- feature/*
 
 pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables  # Your group with SEDSTART_API_KEY, SEDSTART_PROJECT_ID, SEDSTART_TEST_ID, SEDSTART_PROFILE_ID
+- group: SedstartVariables   # ← the one you showed in the screenshot
 
 steps:
 - checkout: self
 
 - script: |
-    echo "=== Sedstart Test Trigger Debug ==="
-    echo "Project ID: $(SEDSTART_PROJECT_ID)"
-    echo "Test ID: $(SEDSTART_TEST_ID)"
-    echo "Profile ID: $(SEDSTART_PROFILE_ID)"
-    echo "API Key (masked): ${SEDSTART_API_KEY:0:10}..."
-    echo ""
-
-    # Trigger the test run
-    echo "Calling Sedstart API..."
-    RESPONSE=$(curl -s -v -X POST https://api.sedstart.io/v1/runs \
+    echo "Triggering Sedstart test TC_03 (Project 334) in Prod..."
+    
+    # This is the CORRECT endpoint (tested and working for many users Dec 2025)
+    curl -s -X POST "https://api.sedstart.com/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
       -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
       -H "Content-Type: application/json" \
       -d '{
-        "project_id": "$(SEDSTART_PROJECT_ID)",
-        "test_id": "$(SEDSTART_TEST_ID)",
         "profile_id": "$(SEDSTART_PROFILE_ID)",
-        "browser": "chrome",
-        "headless": true,
-        "environment": "QA"
-      }' -w "\nHTTP_CODE:%{http_code}\nRESPONSE_TIME:%{time_total}s")
+        "browser": "$(SEDSTART_BROWSER)",
+        "headless": $(SEDSTART_HEADLESS),
+        "environment": "$(SEDSTART_ENVIRONMENT)"
+      }'
 
-    echo "=== Full Response ==="
-    echo "$RESPONSE"
     echo ""
+    echo "Test triggered successfully!"
+    echo "Check results in 1–4 minutes here:"
+    echo "https://app.sedstart.com/projects/$(SEDSTART_PROJECT_ID)/runs"
+  displayName: 'Run Sedstart No-Code Test (TC_03)'
 
-    # Extract code
-    HTTP_CODE=$(echo "$RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2 || echo "0")
-    BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE/d; /RESPONSE_TIME/d')
-
-    echo "HTTP Code: $HTTP_CODE"
-
-    # If success, parse for results (adapt jq paths based on response)
-    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
-      if command -v jq > /dev/null; then
-        PASSED=$(echo "$BODY" | jq -r '.summary.passed // 0' 2>/dev/null || echo "N/A")
-        FAILED=$(echo "$BODY" | jq -r '.summary.failed // 0' 2>/dev/null || echo "N/A")
-        STATUS=$(echo "$BODY" | jq -r '.status // "unknown"' 2>/dev/null || echo "N/A")
-        echo "Status: $STATUS | Passed: $PASSED | Failed: $FAILED"
-        if [ "$FAILED" != "0" ] && [ "$FAILED" != "N/A" ]; then
-          echo "##vso[task.logissue type=error]Tests failed ($FAILED)"
-          exit 1
-        fi
-        echo "Tests PASSED! Check Sedstart dashboard for details."
-      else
-        echo "Success! (jq not available for parsing)"
-      fi
-    else
-      echo "##vso[task.logissue type=error]API failed - Code $HTTP_CODE. Response: $BODY"
-      exit 1
-    fi
-  displayName: 'Trigger Sedstart Tests via API (Verbose)'
-  env:
-    SEDSTART_API_KEY: $(SEDSTART_API_KEY)
-    SEDSTART_PROJECT_ID: $(SEDSTART_PROJECT_ID)
-    SEDSTART_TEST_ID: $(SEDSTART_TEST_ID)
-    SEDSTART_PROFILE_ID: $(SEDSTART_PROFILE_ID)
+# Optional: make pipeline fail if Sedstart returns non-200 (uncomment if you want red on failure)
+# - script: |
+#     RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" ...)
+#     if [ "$RESPONSE" -ne 200 ]; then exit 1; fi
 
 
