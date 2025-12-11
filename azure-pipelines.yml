@@ -23,7 +23,7 @@ steps:
           profileId   = "$(SEDSTART_PROFILE_ID)"
           browser     = "chrome"
           headless    = $true
-          environment = "Prod"
+  
         } | ConvertTo-Json
 
         # Trigger the test run
