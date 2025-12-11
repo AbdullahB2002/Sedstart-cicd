@@ -7,16 +7,16 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables   # ← the one you showed in the screenshot
+- group: SedstartVariables  # Your vars (key, IDs, etc.)
 
 steps:
 - checkout: self
 
 - script: |
-    echo "Triggering Sedstart test TC_03 (Project 334) in Prod..."
+    echo "Triggering Sedstart TC_03 in Prod..."
     
-    # This is the CORRECT endpoint (tested and working for many users Dec 2025)
-    curl -s -X POST "https://api.sedstart.com/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
+    # Trigger the test
+    RESPONSE=$(curl -s -X POST "https://api.sedstart.com/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
       -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
       -H "Content-Type: application/json" \
       -d '{
@@ -24,17 +24,30 @@ steps:
         "browser": "$(SEDSTART_BROWSER)",
         "headless": $(SEDSTART_HEADLESS),
         "environment": "$(SEDSTART_ENVIRONMENT)"
-      }'
+      }' -w "\nHTTP_CODE:%{http_code}")
 
-    echo ""
-    echo "Test triggered successfully!"
-    echo "Check results in 1–4 minutes here:"
-    echo "https://app.sedstart.com/projects/$(SEDSTART_PROJECT_ID)/runs"
-  displayName: 'Run Sedstart No-Code Test (TC_03)'
+    BODY=$(echo "$RESPONSE" | sed '$d')  # Remove HTTP code line
+    HTTP_CODE=$(echo "$RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
 
-# Optional: make pipeline fail if Sedstart returns non-200 (uncomment if you want red on failure)
-# - script: |
-#     RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" ...)
-#     if [ "$RESPONSE" -ne 200 ]; then exit 1; fi
+    echo "HTTP Code: $HTTP_CODE"
+    echo "Response Body: $BODY"
+
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+      # Extract run ID (Sedstart returns it as 'run_id' or 'data.run_id')
+      RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // empty' 2>/dev/null || echo "")
+      
+      if [ -n "$RUN_ID" ]; then
+        echo ""
+        echo "✅ Test triggered! Run ID: $RUN_ID"
+        echo "##vso[task.logissue type=warning]Direct Results Link: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
+        echo "Click above for video/screenshots (headless=false)."
+      else
+        echo "Run started—check dashboard manually: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs"
+      fi
+    else
+      echo "##vso[task.logissue type=error]Trigger failed (Code $HTTP_CODE). Response: $BODY"
+      exit 1
+    fi
+  displayName: 'Run Sedstart TC_03 (With Direct Results Link)'
 
 
