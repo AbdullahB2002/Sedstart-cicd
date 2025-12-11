@@ -5,21 +5,34 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'  # Or 'windows-latest'
 
+# Uncomment ONLY if your variable group is named EXACTLY "Sedstart-Vars" and exists
+# variables:
+#   - group: Sedstart-Vars
+
+# Inline variables (optional overrides; use pipeline vars for secrets)
 variables:
-  - group: your-variable-group  # Replace with your group name
   browser: 'chrome'
   headless: 'true'
   environment: 'Prod'
 
 steps:
-  # Install Node.js (fixes "npx not found")
+  # Step 1: Install Node.js 20 (fixes npx/bash errors)
   - task: NodeTool@0
     inputs:
       versionSpec: '20.x'
     displayName: 'Install Node.js 20'
 
-  # Try the official action first
+  # Step 2: Debug - Check if variables are loaded (remove after testing)
   - script: |
+      echo "Debug: Project ID length = ${#SEDSTART_PROJECT_ID}"
+      echo "Debug: Node version = $(node --version)"
+      echo "Debug: npx available? = $(which npx)"
+    displayName: 'Debug Variables & Tools'
+    # env:  # If vars not loading, add: SEDSTART_PROJECT_ID: $(SEDSTART_PROJECT_ID)
+
+  # Step 3: Run Sedstart via npx (main step)
+  - script: |
+      echo "Starting Sedstart test run..."
       npx @sedstart/action-run-ci@latest \
         --api-key "$(SEDSTART_API_KEY)" \
         --project-id "$(SEDSTART_PROJECT_ID)" \
@@ -27,55 +40,10 @@ steps:
         --profile-id "$(SEDSTART_PROFILE_ID)" \
         --browser $(browser) \
         --headless $(headless) \
-        --environment $(environment) || echo "Action failed, falling back to direct API..."
-    displayName: 'Try Sedstart Action (with fallback)'
-
-  # Fallback: Direct API call (if action isn't available)
-  - powershell: |
-      Write-Host "Starting direct Sedstart API integration..."
-      
-      $headers = @{
-        'Authorization' = "Bearer $(SEDSTART_API_KEY)"
-        'Content-Type' = 'application/json'
-      }
-      
-      $body = @{
-        projectId = "$(SEDSTART_PROJECT_ID)"
-        testId = "$(SEDSTART_TEST_ID)"
-        profileId = "$(SEDSTART_PROFILE_ID)"
-        browser = "$(browser)"
-        headless = [bool]::Parse("$(headless)")
-        environment = "$(environment)"
-      } | ConvertTo-Json -Depth 3
-      
-      try {
-        Write-Host "Triggering test run..."
-        $response = Invoke-RestMethod -Uri "https://api.sedstart.com/v1/runs" -Method Post -Headers $headers -Body $body
-        $runId = $response.runId
-        Write-Host "Test run triggered! Run ID: $runId"
-        
-        # Poll for completion (up to 5 min)
-        $maxWait = 300  # seconds
-        $waitInterval = 30
-        $elapsed = 0
-        do {
-          Start-Sleep -Seconds $waitInterval
-          $elapsed += $waitInterval
-          $statusResponse = Invoke-RestMethod -Uri "https://api.sedstart.com/v1/runs/$runId" -Method Get -Headers $headers
-          Write-Host "Status: $($statusResponse.status) (Waited: $elapsed s)"
-          
-          if ($statusResponse.status -eq 'completed' -or $statusResponse.status -eq 'failed') { break }
-        } while ($elapsed -lt $maxWait)
-        
-        if ($statusResponse.status -ne 'passed') {
-          Write-Error "Tests failed! Status: $($statusResponse.status). Check Sedstart dashboard for details."
-          exit 1
-        }
-        
-        Write-Host "✅ Tests passed! Full results in Sedstart dashboard."
-      } catch {
-        Write-Error "API call failed: $($_.Exception.Message)"
-        exit 1
-      }
-    displayName: 'Run Sedstart Tests via API (Fallback)'
-    condition: always()  # Run even if previous step fails
+        --environment $(environment)
+    displayName: 'Run Sedstart No-Code Tests'
+    env:
+      SEDSTART_API_KEY: $(SEDSTART_API_KEY)  # Ensures secret passes to bash
+      SEDSTART_PROJECT_ID: $(SEDSTART_PROJECT_ID)
+      SEDSTART_TEST_ID: $(SEDSTART_TEST_ID)
+      SEDSTART_PROFILE_ID: $(SEDSTART_PROFILE_ID)
