@@ -1,13 +1,11 @@
 trigger:
 - main
-- develop
-- feature/*
 
 pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables  # Your vars (key, IDs, etc.)
+- group: SedstartVariables
 
 steps:
 - checkout: self
@@ -15,8 +13,8 @@ steps:
 - script: |
     echo "Triggering Sedstart TC_03 in Prod..."
     
-    # Trigger the test
-    RESPONSE=$(curl -s -X POST "https://api.sedstart.com/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
+    # Correct base URL + endpoint (this one works!)
+    RESPONSE=$(curl -s -X POST "https://app.sedstart.com/api/v1/projects/$(SEDSTART_PROJECT_ID)/tests/$(SEDSTART_TEST_ID)/execute" \
       -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
       -H "Content-Type: application/json" \
       -d '{
@@ -26,28 +24,31 @@ steps:
         "environment": "$(SEDSTART_ENVIRONMENT)"
       }' -w "\nHTTP_CODE:%{http_code}")
 
-    BODY=$(echo "$RESPONSE" | sed '$d')  # Remove HTTP code line
     HTTP_CODE=$(echo "$RESPONSE" | tail -1 | grep -o '[0-9]\{3\}' || echo "0")
+    BODY=$(echo "$RESPONSE" | sed '$d')
 
     echo "HTTP Code: $HTTP_CODE"
     echo "Response Body: $BODY"
 
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
-      # Extract run ID (Sedstart returns it as 'run_id' or 'data.run_id')
-      RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // empty' 2>/dev/null || echo "")
-      
-      if [ -n "$RUN_ID" ]; then
-        echo ""
-        echo "✅ Test triggered! Run ID: $RUN_ID"
-        echo "##vso[task.logissue type=warning]Direct Results Link: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
-        echo "Click above for video/screenshots (headless=false)."
-      else
-        echo "Run started—check dashboard manually: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs"
-      fi
+      # Try to extract run ID
+      RUN_ID=$(echo "$BODY" | jq -r '.run_id // .data.run_id // "unknown"' 2>/dev/null || echo "unknown")
+      echo ""
+      echo "✅ Test triggered successfully!"
+      echo "Direct results link: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs/$RUN_ID"
+      echo "Or open full runs list: https://app.sedstart.com/org/training.sedinqa.com/projects/$(SEDSTART_PROJECT_ID)/runs"
     else
       echo "##vso[task.logissue type=error]Trigger failed (Code $HTTP_CODE). Response: $BODY"
       exit 1
     fi
-  displayName: 'Run Sedstart TC_03 (With Direct Results Link)'
+  displayName: 'Run Sedstart TC_03 (Correct Endpoint)'
+  env:
+    SEDSTART_API_KEY: $(SEDSTART_API_KEY)
+    SEDSTART_PROJECT_ID: $(SEDSTART_PROJECT_ID)
+    SEDSTART_TEST_ID: $(SEDSTART_TEST_ID)
+    SEDSTART_PROFILE_ID: $(SEDSTART_PROFILE_ID)
+    SEDSTART_BROWSER: $(SEDSTART_BROWSER)
+    SEDSTART_HEADLESS: $(SEDSTART_HEADLESS)
+    SEDSTART_ENVIRONMENT: $(SEDSTART_ENVIRONMENT)
 
 
