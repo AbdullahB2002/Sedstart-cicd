@@ -2,28 +2,70 @@ trigger:
 - main
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: 'ubuntu-latest'
 
 variables:
-- group: SedstartVariables   # ← your existing group with PROJECT_ID, TEST_ID, PROFILE_ID
+- group: SedstartVariables  # Your group with SEDSTART_API_KEY, SEDSTART_PROJECT_ID, SEDSTART_TEST_ID, SEDSTART_PROFILE_ID
 
 steps:
+- checkout: self
+
 - script: |
-    echo "Triggering Sedstart tests in GitHub..."
-    curl -X POST https://api.github.com/repos/AbdullahB2002/Sedstart-cicd/dispatches \
-      -H "Authorization: token $(GITHUB_PAT)" \
-      -H "Accept: application/vnd.github.v3+json" \
+    echo "=== Sedstart Test Trigger Debug ==="
+    echo "Project ID: $(SEDSTART_PROJECT_ID)"
+    echo "Test ID: $(SEDSTART_TEST_ID)"
+    echo "Profile ID: $(SEDSTART_PROFILE_ID)"
+    echo "API Key (masked): ${SEDSTART_API_KEY:0:10}..."
+    echo ""
+
+    # Trigger the test run
+    echo "Calling Sedstart API..."
+    RESPONSE=$(curl -s -v -X POST https://api.sedstart.io/v1/runs \
+      -H "Authorization: Bearer $(SEDSTART_API_KEY)" \
+      -H "Content-Type: application/json" \
       -d '{
-        "event_type": "run-sedstart",
-        "client_payload": {
-          "project_id": "$(SEDSTART_PROJECT_ID)",
-          "test_id": "$(SEDSTART_TEST_ID)",
-          "profile_id": "$(SEDSTART_PROFILE_ID)"
-        }
-      }'
-    echo "Done! Check results here → https://github.com/AbdullahB2002/Sedstart-cicd/actions"
+        "project_id": "$(SEDSTART_PROJECT_ID)",
+        "test_id": "$(SEDSTART_TEST_ID)",
+        "profile_id": "$(SEDSTART_PROFILE_ID)",
+        "browser": "chrome",
+        "headless": true,
+        "environment": "QA"
+      }' -w "\nHTTP_CODE:%{http_code}\nRESPONSE_TIME:%{time_total}s")
+
+    echo "=== Full Response ==="
+    echo "$RESPONSE"
+    echo ""
+
+    # Extract code
+    HTTP_CODE=$(echo "$RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2 || echo "0")
+    BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE/d; /RESPONSE_TIME/d')
+
+    echo "HTTP Code: $HTTP_CODE"
+
+    # If success, parse for results (adapt jq paths based on response)
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+      if command -v jq > /dev/null; then
+        PASSED=$(echo "$BODY" | jq -r '.summary.passed // 0' 2>/dev/null || echo "N/A")
+        FAILED=$(echo "$BODY" | jq -r '.summary.failed // 0' 2>/dev/null || echo "N/A")
+        STATUS=$(echo "$BODY" | jq -r '.status // "unknown"' 2>/dev/null || echo "N/A")
+        echo "Status: $STATUS | Passed: $PASSED | Failed: $FAILED"
+        if [ "$FAILED" != "0" ] && [ "$FAILED" != "N/A" ]; then
+          echo "##vso[task.logissue type=error]Tests failed ($FAILED)"
+          exit 1
+        fi
+        echo "Tests PASSED! Check Sedstart dashboard for details."
+      else
+        echo "Success! (jq not available for parsing)"
+      fi
+    else
+      echo "##vso[task.logissue type=error]API failed - Code $HTTP_CODE. Response: $BODY"
+      exit 1
+    fi
+  displayName: 'Trigger Sedstart Tests via API (Verbose)'
   env:
-    GITHUB_PAT: $(GITHUB_PAT)
-  displayName: 'Trigger Sedstart Tests (GitHub handles the rest)'
+    SEDSTART_API_KEY: $(SEDSTART_API_KEY)
+    SEDSTART_PROJECT_ID: $(SEDSTART_PROJECT_ID)
+    SEDSTART_TEST_ID: $(SEDSTART_TEST_ID)
+    SEDSTART_PROFILE_ID: $(SEDSTART_PROFILE_ID)
 
 
